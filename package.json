@@ -6,7 +6,7 @@
   "author": "Kurt Lippert",
   "main": "src/index.ts",
   "scripts": {
-    "start": "parcel index.html"
+    "start": "dotenv -e .env parcel index.html"
   },
   "dependencies": {
     "react": "16.8.6",

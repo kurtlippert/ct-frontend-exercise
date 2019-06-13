@@ -2,8 +2,7 @@
 import * as React from 'react'
 const r = React.createElement
 import { render } from 'react-dom'
-import { br, button, div, hr, img, input, label, li, tbody, td, th, thead, tr, ul } from 'react-dom-factories'
-import { BrowserRouter as Router, NavLink } from 'react-router-dom'
+import { br, div, img, input, label, tbody, td, th, thead, tr } from 'react-dom-factories'
 
 // redux
 import { connect, Provider } from 'react-redux'
@@ -15,167 +14,136 @@ import { Observable } from 'rxjs'
 // tslint:disable-next-line:no-submodule-imports
 import { ajax } from 'rxjs/ajax'
 // tslint:disable-next-line:no-submodule-imports
-import { catchError, map, mergeMap } from 'rxjs/operators'
-
-// typestyle
-// import { style } from 'typestyle'
+import { map, mergeMap } from 'rxjs/operators'
 
 // react-bootstrap
 import { Table } from 'react-bootstrap'
-import { withRouter } from 'react-router'
 
 // model
-interface User {
-  id: number,
-  login: string,
-  url: string,
-  avatar_url: string,
+interface Price {
+  id: string,
+  value: { currencyCode: string, centAmount: number },
+}
+
+interface MasterVariant {
+  prices: Price[]
+  images: { url: string }[]
+}
+
+interface ProductProjection {
+  id: string,
+  name: { de: string, en: string },
+  masterVariant: MasterVariant,
+  imageUrl: string,
 }
 
 interface State {
-  skip: number,
-  take: number,
   search: string,
-  users: User[]
+  productProjections: ProductProjection[]
 }
 
 // action
 type Action =
-  | { type: 'FETCH_USERS', skip: number, take: number, search: string }
-  | { type: 'FETCH_USERS_FULFILLED', skip: number, take: number, search: string, users: User[] }
+  | { type: 'FETCH_PRODUCT_PROJECTIONS', search: string }
+  | { type: 'FETCH_PRODUCT_PROJECTIONS_FULFILLED', search: string, productProjections: ProductProjection[] }
 
-const fetchUsers = (search: string, skip: number, take: number): Action => ({
+const fetchProductProjections = (search: string): Action => ({
   search,
-  skip,
-  take,
-  type: 'FETCH_USERS',
+  type: 'FETCH_PRODUCT_PROJECTIONS',
 })
 
-const fetchUsersFulfilled = (search: string, skip: number, take: number, users: User[]): Action => ({
+const fetchProductProjectionsFulfilled = (search: string, productProjections: ProductProjection[]): Action => ({
+  productProjections,
   search,
-  skip,
-  take,
-  type: 'FETCH_USERS_FULFILLED',
-  users,
+  type: 'FETCH_PRODUCT_PROJECTIONS_FULFILLED',
 })
 
 interface EpicDependencies {
-  getJSON: (url: string) => Observable<User[] | { items: User[] }>
+  getJSON: (url: string) => Observable<ProductProjection[]>,
 }
 
-export const fetchUsersEpic:
+export const fetchProductProjectionsEpic:
   Epic<Action, Action, State, EpicDependencies> =
   (action$, _, { getJSON }) =>
     action$.pipe(
-      ofType('FETCH_USERS'),
+      ofType('FETCH_PRODUCT_PROJECTIONS'),
       mergeMap((action) => {
-        const { search, skip, take } = action
+        const { search } = action
         const query = search === '' ? 'users?' : `search/users?q=${search}&`
-        return getJSON(`https://api.github.com/${query}since=${skip + 1}&per_page=${take}`).pipe(
-          map(response =>
-            fetchUsersFulfilled(search, skip, take,
-              search === '' ? response as User[] : (response as { items: User[] }).items)),
-          // tslint:disable-next-line:no-console
-          catchError((error) => console.log(`error: ${error}`) as never),
-        )
+        return ajax.post(
+          'https://auth.commercetools.co/oauth/token',
+          { 'grant_type': 'client_credentials' },
+          { 'Authorization': 'Basic ' + btoa(process.env.CLIENT_ID + ':' + process.env.CLIENT_SECRET) }).pipe(
+            map(({ response }: any) => response.access_token),
+            mergeMap(token => {
+              return ajax.get(
+                'https://api.commercetools.co/frontend-engineering-exercise/product-projections?limit=5',
+                { 'Authorization': 'Bearer ' + token }
+              ).pipe(
+                map(({ response }: { response: { results: ProductProjection[] } }) => {
+                  return fetchProductProjectionsFulfilled('', response.results)
+                })
+              )
+            }),
+          )
       }),
     )
 
 // reducers
 const reducer = (state: State, action: Action): State => {
   switch (action.type) {
-    case 'FETCH_USERS_FULFILLED':
+    case 'FETCH_PRODUCT_PROJECTIONS_FULFILLED':
       return {
         ...state,
         search: action.search,
-        skip: action.skip,
-        take: action.take,
-        users: action.users,
+        productProjections: action.productProjections,
       }
     default:
       return state
   }
 }
 
-// views
-const home = () => {
-  return div({},
-    div({}, 'home page'),
-  )
-}
-
 // tslint:disable-next-line:variable-name
-const _about: React.SFC<{ state: State }> = ({ state }) =>
+const _home: React.SFC<{ state: State }> = ({ state }: { state: State }) =>
   div({},
-    div({}, 'about page'),
+    div({}, 'Product Projections'),
     br(),
     div({ className: 'form-group' },
       label({}, 'Filter'),
       input({
         className: 'form-control',
-        onChange: (e) => store.dispatch(fetchUsers(e.target.value, state.skip, state.take)),
+        onChange: (e: any) => store.dispatch(fetchProductProjections(e.target.value)),
       }),
     ),
     r(Table, { responsive: true },
       thead({},
         tr({},
           th({}, '#'),
-          th({}, 'Username'),
-          th({}, 'Url'),
-          th({}, 'Avatar'),
+          th({}, 'Name'),
+          th({}, 'Value (cents)'),
+          th({}, 'Image'),
         ),
       ),
       tbody({},
-        (state.users).map((user: User, index: number) =>
-          tr({ key: user.id },
+        (state.productProjections).map((productProjection: ProductProjection, index: number) =>
+          tr({ key: productProjection.id },
             td({}, index),
-            td({}, user.login),
-            td({}, user.url),
+            td({}, productProjection.name.en),
             td({},
-              img({ src: user.avatar_url, height: '32', width: '32' }),
+              productProjection.masterVariant.prices
+                .map(price => `${price.value.centAmount} ${price.value.currencyCode}`)[0]),
+            td({},
+              img({ src: productProjection.masterVariant.images[0].url, height: '32', width: '32' }),
             ),
           ),
         ),
       ),
     ),
-    button({
-      className: `btn btn-link ${state.skip < 5 ? 'disabled' : ''}`,
-      onClick: () => store.dispatch(fetchUsers(state.search, state.skip - state.take, state.take)),
-    }, 'Previous'),
-    button({
-      className: `btn btn-link ${state.users.length < 5 ? 'disabled' : ''}`,
-      onClick: () => store.dispatch(fetchUsers(state.search, state.skip + state.take, state.take)),
-    }, 'Next'),
   )
 
-const about = connect(
+const home = connect(
   (state: State) => ({ state }),
-)(_about)
-
-const topics = () =>
-  div({},
-    div({}, 'topic page'),
-  )
-
-// tslint:disable-next-line:variable-name
-const _ConnectedContainer: React.SFC<{ location: any }> = ({ location }) =>
-    div({},
-      location.pathname,
-      br({}),
-      br({}),
-      location.pathname === '/'
-        ? r(home)
-        : location.pathname === '/about'
-          ? r(about)
-          : location.pathname === '/topics'
-            ? r(topics)
-            : r(home),
-    )
-
-const ConnectedContainer = withRouter(
-  connect(
-    (_: State, ownProps: any) => ({ location: ownProps.location }),
-  )(_ConnectedContainer) as any)
+)(_home)
 
 interface RootProps {
   store: Store<State>
@@ -184,16 +152,8 @@ interface RootProps {
 // tslint:disable-next-line:no-shadowed-variable
 const Root: React.SFC<RootProps> = ({ store }) =>
   r(Provider, { store },
-    r(Router, {},
-      div({ className: 'container mt-3' },
-        ul({},
-          li({}, r(NavLink, { to: '/' }, 'Home')),
-          li({}, r(NavLink, { to: '/about' }, 'About')),
-          li({}, r(NavLink, { to: '/topics' }, 'Topics')),
-        ),
-        hr({}),
-        r(ConnectedContainer),
-      ),
+    div({ className: 'container mt-3' },
+      r(home),
     ),
   )
 
@@ -205,14 +165,12 @@ const epicMiddleware = createEpicMiddleware<Action, Action, State, EpicDependenc
 
 const initialState: State = {
   search: '',
-  skip: 0,
-  take: 5,
-  users: [],
+  productProjections: [],
 }
 
 const store: any = createStore(reducer, initialState, applyMiddleware(epicMiddleware))
 
-epicMiddleware.run(fetchUsersEpic)
+epicMiddleware.run(fetchProductProjectionsEpic)
 
 // render
 render(
@@ -220,4 +178,4 @@ render(
   document.getElementById('root'),
 )
 
-store.dispatch(fetchUsers(initialState.search, initialState.skip, initialState.take))
+store.dispatch(fetchProductProjections(initialState.search))
